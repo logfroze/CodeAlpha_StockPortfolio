@@ -58,6 +58,9 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="font-semibold text-sm text-zinc-950 tracking-tight">
                   Portfolio Tracker
                 </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-zinc-900 text-white shadow-xs">
+                  CodeAlpha - Python - Task 02
+                </span>
                 <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/50">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                   Live
