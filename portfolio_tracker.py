@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CodeAlpha Stock Portfolio Tracker
-=================================
+CodeAlpha - Python - Task 02: Stock Portfolio Tracker
+======================================================
 A practical Python console application to track stocks, calculate individual
 and total portfolio investment values, and fetch real-time market data using yfinance.
 
