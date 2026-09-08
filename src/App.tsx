@@ -7,19 +7,57 @@ import { TerminalView } from "./components/TerminalView";
 import { CodeViewer } from "./components/CodeViewer";
 import { StockHolding, PortfolioTotals } from "./types";
 
+const DEFAULT_STOCK_CATALOG: Record<string, { price: number; name: string; change_pct: number }> = {
+  AAPL: { price: 180.0, name: "Apple Inc.", change_pct: -0.75 },
+  TSLA: { price: 250.0, name: "Tesla, Inc.", change_pct: 2.32 },
+  MSFT: { price: 420.0, name: "Microsoft Corporation", change_pct: -1.12 },
+  GOOGL: { price: 175.0, name: "Alphabet Inc.", change_pct: 0.85 },
+  AMZN: { price: 190.0, name: "Amazon.com, Inc.", change_pct: 1.20 },
+  NVDA: { price: 125.0, name: "NVIDIA Corporation", change_pct: 3.45 },
+  META: { price: 500.0, name: "Meta Platforms, Inc.", change_pct: -0.40 },
+  NFLX: { price: 650.0, name: "Netflix, Inc.", change_pct: 1.10 },
+  AMD: { price: 160.0, name: "Advanced Micro Devices", change_pct: -1.50 },
+  INTC: { price: 30.0, name: "Intel Corporation", change_pct: 0.20 },
+};
+
 const INITIAL_HOLDINGS: Record<string, number> = {
   AAPL: 5.0,
   TSLA: 2.0,
   MSFT: 3.0,
 };
 
-export default function App() {
-  const [holdings, setHoldings] = useState<StockHolding[]>([]);
-  const [totals, setTotals] = useState<PortfolioTotals>({
-    total_value: 0,
-    total_holdings: 0,
-    total_shares: 0,
+function createHoldingsFromCatalog(raw: Record<string, number>): StockHolding[] {
+  return Object.entries(raw).map(([sym, qty]) => {
+    const s = sym.toUpperCase();
+    const info = DEFAULT_STOCK_CATALOG[s] || { price: 100.0, name: s, change_pct: 0.0 };
+    return {
+      symbol: s,
+      name: info.name,
+      quantity: qty,
+      price: info.price,
+      value: Math.round(qty * info.price * 100) / 100,
+      currency: "USD",
+      source: "Baseline (Offline/Catalog)",
+      change_pct: info.change_pct,
+      updated_at: new Date().toLocaleTimeString(),
+    };
   });
+}
+
+function calculateTotalsFromList(items: StockHolding[]): PortfolioTotals {
+  const total_value = items.reduce((sum, i) => sum + i.value, 0);
+  const total_shares = items.reduce((sum, i) => sum + i.quantity, 0);
+  return {
+    total_value: Math.round(total_value * 100) / 100,
+    total_holdings: items.length,
+    total_shares: Math.round(total_shares * 10000) / 10000,
+  };
+}
+
+export default function App() {
+  const initialList = createHoldingsFromCatalog(INITIAL_HOLDINGS);
+  const [holdings, setHoldings] = useState<StockHolding[]>(initialList);
+  const [totals, setTotals] = useState<PortfolioTotals>(calculateTotalsFromList(initialList));
   const [activeTab, setActiveTab] = useState<"dashboard" | "terminal" | "code">("dashboard");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedHoldingForEdit, setSelectedHoldingForEdit] = useState<StockHolding | undefined>(undefined);
@@ -32,18 +70,11 @@ export default function App() {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Recalculate totals from holdings array
   const computeTotals = (items: StockHolding[]): PortfolioTotals => {
-    const total_value = items.reduce((sum, i) => sum + i.value, 0);
-    const total_shares = items.reduce((sum, i) => sum + i.quantity, 0);
-    return {
-      total_value: Math.round(total_value * 100) / 100,
-      total_holdings: items.length,
-      total_shares: Math.round(total_shares * 10000) / 10000,
-    };
+    return calculateTotalsFromList(items);
   };
 
-  // Fetch live portfolio data via Python backend
+  // Fetch live portfolio data via Python backend (if available)
   const calculateLivePortfolio = async (rawHoldings: Record<string, number>) => {
     try {
       setIsRefreshing(true);
@@ -52,6 +83,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ holdings: rawHoldings }),
       });
+      if (!res.ok) throw new Error("API not available");
       const data = await res.json();
       if (data.success && data.portfolio) {
         const holdingList: StockHolding[] = Object.values(data.portfolio);
@@ -59,7 +91,10 @@ export default function App() {
         setTotals(data.totals || computeTotals(holdingList));
       }
     } catch (e) {
-      console.error("Failed to fetch live portfolio calculation", e);
+      // Fallback for static hosting (e.g. GitHub Pages) or offline mode
+      const fallbackList = createHoldingsFromCatalog(rawHoldings);
+      setHoldings(fallbackList);
+      setTotals(computeTotals(fallbackList));
     } finally {
       setIsRefreshing(false);
     }
@@ -94,57 +129,69 @@ export default function App() {
   // Add or update a stock
   const handleAddStock = async (symbol: string, quantity: number, mode: "add" | "replace") => {
     const sym = symbol.toUpperCase();
+    const fallbackInfo = DEFAULT_STOCK_CATALOG[sym] || { price: 150.0, name: sym, change_pct: 0.0 };
+
+    let price = fallbackInfo.price;
+    let name = fallbackInfo.name;
+    let source = "Baseline Catalog";
+    let change_pct: number | null = fallbackInfo.change_pct;
+    let currency = "USD";
+
     try {
       const res = await fetch(`/api/quote?symbol=${encodeURIComponent(sym)}`);
-      const quote = await res.json();
-      const price = quote.success ? quote.price : 100.0;
-      const name = quote.success ? quote.name : sym;
-      const source = quote.success ? quote.source : "Manual";
-      const change_pct = quote.change_pct ?? null;
-      const currency = quote.currency || "USD";
-
-      setHoldings((prev) => {
-        const existingIdx = prev.findIndex((h) => h.symbol === sym);
-        let updated: StockHolding[];
-
-        if (existingIdx >= 0) {
-          const existing = prev[existingIdx];
-          const newQty = mode === "add" ? existing.quantity + quantity : quantity;
-          const newHolding: StockHolding = {
-            ...existing,
-            quantity: newQty,
-            price,
-            value: Math.round(newQty * price * 100) / 100,
-            source,
-            change_pct,
-            updated_at: new Date().toLocaleTimeString(),
-          };
-          updated = [...prev];
-          updated[existingIdx] = newHolding;
-        } else {
-          const newHolding: StockHolding = {
-            symbol: sym,
-            name,
-            quantity,
-            price,
-            value: Math.round(quantity * price * 100) / 100,
-            currency,
-            source,
-            change_pct,
-            updated_at: new Date().toLocaleTimeString(),
-          };
-          updated = [...prev, newHolding];
+      if (res.ok) {
+        const quote = await res.json();
+        if (quote.success) {
+          price = quote.price;
+          name = quote.name;
+          source = quote.source;
+          change_pct = quote.change_pct ?? null;
+          currency = quote.currency || "USD";
         }
-
-        setTotals(computeTotals(updated));
-        persistHoldings(updated);
-        return updated;
-      });
-
-      showNotification(`Added ${quantity} shares of ${sym} to portfolio.`);
+      }
     } catch {
-      showNotification(`Failed to quote ${sym}`);
+      // Offline fallback used
     }
+
+    setHoldings((prev) => {
+      const existingIdx = prev.findIndex((h) => h.symbol === sym);
+      let updated: StockHolding[];
+
+      if (existingIdx >= 0) {
+        const existing = prev[existingIdx];
+        const newQty = mode === "add" ? existing.quantity + quantity : quantity;
+        const newHolding: StockHolding = {
+          ...existing,
+          quantity: newQty,
+          price,
+          value: Math.round(newQty * price * 100) / 100,
+          source,
+          change_pct,
+          updated_at: new Date().toLocaleTimeString(),
+        };
+        updated = [...prev];
+        updated[existingIdx] = newHolding;
+      } else {
+        const newHolding: StockHolding = {
+          symbol: sym,
+          name,
+          quantity,
+          price,
+          value: Math.round(quantity * price * 100) / 100,
+          currency,
+          source,
+          change_pct,
+          updated_at: new Date().toLocaleTimeString(),
+        };
+        updated = [...prev, newHolding];
+      }
+
+      setTotals(computeTotals(updated));
+      persistHoldings(updated);
+      return updated;
+    });
+
+    showNotification(`Added ${quantity} shares of ${sym} to portfolio.`);
   };
 
   // Remove a stock

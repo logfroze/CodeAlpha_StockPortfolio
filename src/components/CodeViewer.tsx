@@ -13,13 +13,20 @@ export const CodeViewer: React.FC = () => {
 
   useEffect(() => {
     fetch("/api/source-code")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API not available");
+        return res.json();
+      })
       .then((data) => {
         setCodes(data);
         setLoading(false);
       })
       .catch((err) => {
-        console.error(err);
+        setCodes({
+          pythonCode: `# CodeAlpha Stock Portfolio Tracker\n# View full source code in portfolio_tracker.py in the repository.\n# This Python script tracks stocks, calculates portfolio values, and integrates Yahoo Finance.`,
+          testCode: `# CodeAlpha Portfolio Tracker Unit Tests\n# See test_portfolio_tracker.py in the repository for full test coverage.`,
+          readme: `# CodeAlpha Stock Portfolio Tracker\n\nA Python terminal application that tracks stock holdings, calculates individual and total portfolio investment values, and fetches real-time market data.\n\nDeveloped for CodeAlpha Programming Internship.`,
+        });
         setLoading(false);
       });
   }, []);
